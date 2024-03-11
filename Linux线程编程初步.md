@@ -63,3 +63,198 @@ pthread_t pthread_self();
 // 线程等待
 int pthrad_join(pthread_t thread, void** retval);
 ```
+
+### 多进程内存共享
+
+```C
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
+/*
+pathname: 一个必须是已经存在的路径名
+proj_id: 自定义一个ID，用于后续生成唯一的key
+*/
+key_t ftok(const char* pathname, int proj_id);
+
+/*
+key: 将共享内存跟key关联起来
+size: 申请的共享内存大小，必须是 页大小(PAGE_SIZE)的整数倍
+shmflg: IPC_CREATE : 创建一个共享内存, 如果不使用这个，会默认寻找key关联的共享内存
+        IPC_EXCL: 跟IPC_CREATE配合使用，使用这个标志，确保如果共享内存段存在会返回错误
+        SHM_HUGETLB：申请巨页内存
+        其余的flag 参考open函数的flag
+*/
+int shmget(key_t key, size_t size, int shmflg);
+
+/*
+shmid: 由shmget返回的id
+shmaddr: 如果shmflg包含 SHM_RND, 共享内存地址就会返回shmaddr指定的地址
+shmflg：SHM_RND，
+        SHM_RDONLY：只读权限
+*/
+void *shmat(int shmid, const void *shmaddr, int shmflg);
+```
+
+## 实验
+
+### 实验一
+性能对比：对比创建/销毁
+```C
+#include <stdio.h>
+#include <unistd.h>
+#include <time.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+
+#define LOOP_TIMES 100000
+#define DIFFMS(t1, t2)\
+    (t2.tv_sec - t1.tv_sec) * 1000 + (t2.tv_nsec - t1.tv_nsec) / 1000000
+
+void* thread_proc(void* arg)
+{
+    return NULL;
+}
+
+void test_thread()
+{
+    struct timespec begin;
+    struct timespec end;
+
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+
+    for(int i = 0; i < LOOP_TIMES; i++)
+    {
+        pthread_t tid;
+        pthread_create(&tid, NULL, thread_proc, NULL);
+        pthread_join(tid, NULL);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    printf("thread: %ldms\n", DIFFMS(begin, end));
+}
+
+void test_process()
+{
+    struct timespec begin;
+    struct timespec end;
+
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+
+    for(int i = 0; i < LOOP_TIMES; i++)
+    {
+        pid_t pid;
+
+        pid = fork();
+
+        if(pid > 0) 
+        {
+            waitpid(pid, NULL, 0);
+        }
+        else
+        {
+            exit(0);
+        } 
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    printf("process: %ld ms\n", DIFFMS(begin, end));
+}
+
+int main()
+{
+    test_thread();
+    test_process();
+
+    return 0;
+}
+```
+
+### 实验二
+数据共享：多线程利用全局变量共享，多进程机制复杂
+
+```C
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/fcntl.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+
+#define PATH "./"
+#define PROJ_ID 66
+
+void* proc(void* argv)
+{
+    char* buf = (char*)argv;
+
+    strcpy(buf, "this is max here(thread)\n");
+
+    return NULL;
+}
+
+void test_thread()
+{
+    pthread_t tid;
+    char* buf = (char*)calloc(1, 128);
+
+    int ret = pthread_create(&tid, NULL, proc, buf);
+
+    if(ret == 0)
+    {
+        pthread_join(tid, NULL);
+
+        printf("%s", buf);
+    }
+
+    free(buf);
+}
+
+void test_process()
+{
+    int shmid;
+    key_t k;
+
+    k = ftok(PATH, PROJ_ID);
+
+    if(k >= 0)
+    {
+        shmid = shmget(k, 128, IPC_CREAT | S_IRWXU);
+
+        int pid = fork();
+
+        if(pid > 0)
+        {
+            char* s = (char*)shmat(shmid, NULL, 0);
+            
+            waitpid(pid, NULL, 0);
+
+            printf("%s\n", s);
+        }
+        else if(pid == 0)
+        {
+            char* s = (char*)shmat(shmid, NULL, 0);
+
+            strcpy(s, "this is max here(process)");
+
+            exit(0);
+        }
+    }
+}
+
+int main()
+{
+    test_thread();
+    test_process();
+    return 0;
+}
+```
