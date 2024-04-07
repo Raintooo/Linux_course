@@ -19,6 +19,6 @@
 
 线程篇
 - [Linux线程编程初步](Linux线程编程初步.md)
-- [Linux线程API详解](Linux线程编程初步.md)
+- [Linux线程API详解](Linux线程API详解.md)
 
   课程进行中...
