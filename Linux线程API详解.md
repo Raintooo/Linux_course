@@ -1,12 +1,21 @@
-- [Linux线程API详解](#linux线程api详解)
+- [Linux线程API详解(上)](#linux线程api详解上)
   - [再论线程创建](#再论线程创建)
   - [线程属性 ```pthread_attr_t```参数](#线程属性-pthread_attr_t参数)
   - [线程结束方式](#线程结束方式)
     - [线程的返回值](#线程的返回值)
   - [实验](#实验)
+- [Linux线程API详解(下)](#linux线程api详解下)
+  - [线程清理函数](#线程清理函数)
+    - [何时触发清理函数](#何时触发清理函数)
+    - [注意](#注意)
+  - [思考](#思考)
+    - [```pthread_exit()```与```exit()```](#pthread_exit与exit)
+    - [```pthread_exit()```与```vfork()```](#pthread_exit与vfork)
+      - [vfork](#vfork)
+      - [vfork 与 线程](#vfork-与-线程)
 
 
-# Linux线程API详解
+# Linux线程API详解(上)
 
 ## 再论线程创建
 
@@ -343,3 +352,65 @@ int main(int argc, char* argv[])
     return 0;
 }
 ```
+# Linux线程API详解(下)
+
+问题：  
+一个线程申请了资源，但是在运行中不得不提前结束，该怎么办？
+
+## 线程清理函数
+
+```C
+#include <pthread.h>
+
+// routine 清理函数
+// arg 清理函数传参
+void pthread_cleanup_push(void (*routine)(void *), void *arg);
+
+// execute 如果非0，则执行清理函数
+void pthread_cleanup_pop(int execute);
+
+Compile and link with -pthread.
+```
+
+**注意这两个函数必须同时出现在同一作用域**
+
+### 何时触发清理函数
+
+* 调用```pthread_exit()```或者```pthread_cancel()``` 并且 ```pthread_cleanup_pop```参数非0会触发
+
+### 注意
+
+* ```pthread_cleanup_push```和```pthread_cleanup_pop```本质上是**宏**
+* 这两个宏 内部实现构成内部作用域
+* ```pthread_cleanup_push``` 包含了一个 ```{```
+* ```pthread_cleanup_pop``` 包含了一个 ```}```
+
+## 思考
+
+如果主线程调用 ```pthread_exit()``` 会发送什么  
+
+结果就是 主线程退出，子线程继续执行
+
+### ```pthread_exit()```与```exit()```
+
+* ```pthread_exit()```结束当前执行流，仅释放线程资源
+  * 如果是主线程，则
+    * 单线程：主线程结束，进程结束
+    * 多线程：主线程结束，子线程继续执行，**进程进入僵尸状态**
+* ```exit()``` 结束进程，释放所有资源
+
+### ```pthread_exit()```与```vfork()```
+
+#### vfork
+* 创建子进程，不会复制父进程资源数据
+* 子进程直接使用父进程进程空间资源
+* 子进程可以使用父进程堆栈
+* 子进程不能直接 ```return```
+
+#### vfork 与 线程
+
+* vfork 只是创建了新的执行流
+* 线程有自己专属资源(堆栈)，同时共享全局资源
+* vfork 不能和父进程同时执行，父进程需要等待子进程执行结束
+* 线程可以和主线程同时执行 
+
